@@ -1,0 +1,129 @@
+---
+title: "Generating N-grams for Word Prediction"
+author: "Austin L. Bistline"
+date: "August 1, 2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(stringr)
+library(quanteda)
+library(data.table)
+library(tibble)
+library(widyr)
+```
+
+
+```{r, echo=FALSE}
+## read in twitter, blogs, and news data
+con         = file("../en_US.twitter.txt", "r") # open connection to the twitter data
+twitter     = readLines(con, encoding="UTF-8", skipNul=T) # Store all twitter data
+close(con); rm(con) # Close and remove "con"
+
+con         = file("../en_US.blogs.txt", "r") #open connection to the blog data
+blog        = readLines(con, encoding="UTF-8", skipNul=T) # Store all blog data
+close(con); rm(con) # Close and remove "con"
+
+con         = file("../en_US.news.txt", "rb") # open connection to the news data
+news        = readLines(con, encoding="UTF-8") # Store all news data
+close(con); rm(con) # Close and remove "con"
+```
+
+```{r}
+## Combine and sample 25k documents to reduce size and processing demands
+
+set.seed(1982) # make it repeatable
+
+text            = c(twitter, blog, news)
+txtsmple        = sample(text, 25000)
+
+# convert all to utf-8 format
+txtsmple        = iconv(txtsmple, "utf-8", "ascii", sub = "")
+#head(txtsmple)
+```
+
+```{r}
+# convert the sample to a corpus for the tokens function
+corp <- corpus(unlist(txtsmple))
+```
+
+```{r}
+# convert the strings to individual tokens
+master_tokens = tokens(
+  x              = tolower(corp),
+  remove_numbers = TRUE,
+  remove_punct   = TRUE,
+  remove_symbols = TRUE,
+  remove_twitter = TRUE,
+  remove_hyphens = TRUE,  
+  remove_url     = TRUE
+)
+```
+
+```{r}
+# create n-grams up to n = 6
+n2gram = tokens_ngrams(master_tokens, n = 2, concatenator = " ")
+n3gram = tokens_ngrams(master_tokens, n = 3, concatenator = " ")
+n4gram = tokens_ngrams(master_tokens, n = 4, concatenator = " ")
+n5gram = tokens_ngrams(master_tokens, n = 5, concatenator = " ")
+n6gram = tokens_ngrams(master_tokens, n = 6, concatenator = " ")
+```
+
+```{r}
+# create data-feature matrices of the ngrams for counting
+n2dfm = dfm(n2gram)
+n3dfm = dfm(n3gram)
+n4dfm = dfm(n4gram)
+n5dfm = dfm(n5gram)
+n6dfm = dfm(n6gram)
+```
+
+```{r}
+# collect the number of occurences of each ngram
+n2stats = textstat_frequency(n2dfm)
+n3stats = textstat_frequency(n3dfm)
+n4stats = textstat_frequency(n4dfm)
+n5stats = textstat_frequency(n5dfm)
+n6stats = textstat_frequency(n6dfm)
+
+# combine the stats data frames
+stats = rbind(n2stats, n3stats, n4stats, n5stats, n6stats)
+```
+
+```{r}
+# modify the stats data frame to put n-1 gram in 1 column and last word in another
+
+# define function
+firstWords = function(string){
+  full_phrase = unlist(strsplit(string, " "))
+  len = length(full_phrase)
+  return(paste(full_phrase[1:(len - 1)], collapse = " "))
+}
+
+lastWord = function(string){
+  len = length(unlist(strsplit(string, " ")))
+  return(unlist(strsplit(string, " "))[len])
+}
+
+# create a data table from the stats data frame
+stats_table = as.data.table(
+  stats
+)
+
+# modify the 
+stats_table[, rank := NULL]
+stats_table[, docfreq := NULL]
+stats_table[, group := NULL]
+stats_table[, ngrams := sapply(feature, firstWords)]
+stats_table[, nxtwrd := sapply(feature, lastWord)]
+stats_table[, feature := NULL]
+```
+
+```{r}
+# save the data table
+fwrite(stats_table, "stats_table.csv")
+```
